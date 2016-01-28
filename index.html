@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Search Example</title>
+  <meta charset="UTF-8">
+  <script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
+  <!-- look and feel -->
+  <link rel="stylesheet" type="text/css" href="../example-api-common/style.css">
+  <link rel="stylesheet" type="text/css" href="http://blog.dfilimonov.com/github-ribbons-css/ribbons.css">
+  <script src="../example-api-common/style.js"></script>
+  <!-- shared sources -->
+  <script src="../example-api-common/common.js"></script>
+</head>
+<body>
+  <div id="header"></div>
+
+  <div id="example" class="content">
+    <h1>API Search Example</h1>
+  
+    <div id="loading">
+      Please wait while it loads.
+    </div>
+    
+    <div id="search" style="display: none;" >
+    Enter search keyword: <input type="search" id="searchInput" /> <button id="searchInputButton">Search</button>
+    </div>
+
+    <table id="searchResults" style="display: none;" border="1">
+      <thead>
+        <tr>
+          <th>HS Item</th>
+          <th>Description</th>
+          <th>Keywords Matched</th>
+          <th>Score</th>
+          <th>Result No</th>
+        </tr>
+      </thead>
+      <tbody id="searchResultsBody"></tbody>
+    </table>
+
+    <script>
+      $(document).ready(function()
+      {
+        // load hierarchy
+        var hierarchy = {};
+        $.invoke('/tariffs/hierarchy', function(h_)
+        {
+          hierarchy = h_;
+          $('#search').show();
+          $('#loading').hide();
+        });
+
+        // perform search
+        $('#searchInputButton').click(function(event)
+        {
+          // get input
+          var query = $('#searchInput').val();
+          query = query.toLowerCase().replace(/[^a-zA-Z0-9 \.]/g, ' ').replace(/\s+/g, '+').replace(/^\+|\+$/g, '').split(/\+/g);
+
+          // perform search
+          $.invoke('/search/' + query.join('+').replace(/\./g, ''), function(results)
+          {
+            function decodeKeywords(query, keywords)
+            {
+              var output = [];
+              for (var x = 0; (1 << x) <= keywords; x++)
+              {
+                if (((1 << x) & keywords) !== 0)
+                {
+                  output.push(query[x]);
+                }
+              }
+              return output;
+            }
+
+            // show results
+            $('#searchResultsBody').html(results.map(function(result, resultIndex)
+            {
+              return '<tr>' +
+                     '<th>' + result.item + '</th>' +
+                     '<td>' + hierarchy[result.item].description + '</td>' +
+                     '<td>' + decodeKeywords(query, result.keywords).join(', ') + '</td>' + 
+                     '<td>' + result.score + '</td>' +
+                     '<td>' + (resultIndex + 1) + '</td>' +
+                     '</tr>';
+            }).join(''));
+            $('#searchResults').show();
+          });
+        });
+        
+        $('#searchInput').keydown(function(event)
+        {
+          if (event.keyCode === 13)
+          {
+            $('#searchInputButton').click();
+          }
+        });
+        
+      });
+    </script>
+  
+  </div>
+  
+  <div id="footer"></div>
+  
+</body>
+</html>
