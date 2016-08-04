@@ -3,7 +3,10 @@
 <head>
   <title>Search Example</title>
   <meta charset="UTF-8">
-  <script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
+  <!-- jquery and friends -->
+  <script src="//ausftas.github.io/example-api-common/jquery-2.2.4.js"></script>
+  <script src="//ausftas.github.io/example-api-common/jquery-ui.js"></script>
+  <link rel="stylesheet" type="text/css" href="//ausftas.github.io/example-api-common/jquery-ui.css">
   <!-- look and feel -->
   <link rel="stylesheet" type="text/css" href="//ausftas.github.io/example-api-common/style.css">
   <link rel="stylesheet" type="text/css" href="http://blog.dfilimonov.com/github-ribbons-css/ribbons.css">
@@ -22,69 +25,225 @@
     </div>
     
     <div id="search" style="display: none;" >
-    Enter search keyword: <input type="search" id="searchInput" /> <button id="searchInputButton">Search</button>
+    Enter search keyword: <input type="search" id="searchInput" /> <select id="searchInputCountryAgreement"> </select> <button id="searchInputButton">Search</button>
     </div>
 
-    <table id="searchResults" style="display: none;" border="1">
-      <thead>
-        <tr>
-          <th>HS Item</th>
-          <th>Description</th>
-          <th>Keywords Matched</th>
-          <th>Score</th>
-          <th>Result No</th>
-        </tr>
-      </thead>
-      <tbody id="searchResultsBody"></tbody>
-    </table>
+    <div id="searchResults" style="display: none;" >
+      <p id="searchKeywords" ></p>
+      <p id="searchCorrections" ></p>
+      <table border="1">
+        <thead>
+          <tr>
+            <th>Heading</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="searchResultsBody"></tbody>
+      </table>
+    </div>
 
     <script>
-      $(document).ready(function()
+      $.startExample(function(hierarchy, agreements)
       {
-        // load hierarchy
-        var hierarchy = {};
-        $.invoke('/tariffs/hierarchy', function(h_)
-        {
-          hierarchy = h_;
-          $('#search').show();
-          $('#loading').hide();
+        // typeahead
+        $( "#searchInput" ).autocomplete({
+          minLength: 2,
+          source: function( request, response )
+          {
+            $.invoke("/search-hint/" + request.term.split(/[^a-z]+/g).filter(f => f).join('+'), function( data )
+            {
+              response( data );
+            });
+          }
         });
-
+        
+        // country menu
+        var agreementCountries = [];
+        Object.keys(agreements).forEach(function(agreement)
+        {
+          Object.keys(agreements[agreement].countries).forEach(function(country)
+          {
+            agreementCountries.push(agreement + '-' + country);
+          });
+        });
+        
+        $( "#searchInputCountryAgreement" ).html(agreementCountries.map(function(item){return '<option>' + item + '</option>';}).join(''));
+        
+        // saved query
+        $('#searchInput').val(localStorage.query || '')
+        
+        // loading done
+        $('#search').show();
+        $('#loading').hide();
+        
         // perform search
         $('#searchInputButton').click(function(event)
         {
-          // get input
-          var query = $('#searchInput').val();
-          query = query.toLowerCase().replace(/[^a-zA-Z0-9 \.]/g, ' ').replace(/\s+/g, '+').replace(/^\+|\+$/g, '').split(/\+/g);
-
+          // get input and save query
+          var query = localStorage.query = $('#searchInput').val();
+          
           // perform search
+          query = query.toLowerCase().replace(/[^a-zA-Z0-9 \.]/g, ' ').replace(/\s+/g, '+').replace(/^\+|\+$/g, '').split(/\+/g);
           $.invoke('/search/' + query.join('+').replace(/\./g, ''), function(results)
           {
-            function decodeKeywords(query, keywords)
+            // show input keywords
+            $('#searchKeywords').text('You searched for "' + results.keywords.join(' ') + '"');
+            
+            // show alternate keywords
+            if (results.alternateKeywords.length > 0)
             {
-              var output = [];
-              for (var x = 0; (1 << x) <= keywords; x++)
+              $('#searchCorrections').html('Did you mean <ul>' + results.alternateKeywords.map(function(key)
               {
-                if (((1 << x) & keywords) !== 0)
-                {
-                  output.push(query[x]);
-                }
-              }
-              return output;
+                return '<li><a href="javascript:$(\'#searchInput\').val(\'' + key + '\'); $(\'#searchInputButton\').click()">' + key + '</a></li>'
+              }).join(' ') + '</ul>');
             }
-
-            // show results
-            $('#searchResultsBody').html(results.map(function(result, resultIndex)
+            else
             {
-              return '<tr>' +
-                     '<th>' + result.item + '</th>' +
-                     '<td>' + hierarchy[result.item].description + '</td>' +
-                     '<td>' + decodeKeywords(query, result.keywords).join(', ') + '</td>' + 
-                     '<td>' + result.score + '</td>' +
-                     '<td>' + (resultIndex + 1) + '</td>' +
-                     '</tr>';
-            }).join(''));
-            $('#searchResults').show();
+              $('#searchCorrections').html('');
+            }
+            
+            // show results list and hierarchy
+            var output = [];
+            var lookup = {};
+            
+            function showResults()
+            {
+              // show results
+              $('#searchResultsBody').html(output.map(function(result, resultIndex)
+              {
+                var html = '';
+                
+                html += ' [matches: ' + result.keywords + '; m: ' + result.mode + '; s: ' + result.score + '] ';
+                
+                if (result.detailed)
+                {
+                  html += '';
+                  
+                  function renderNode(object)
+                  {
+                    var html = '';
+                    if (!object.nolist)
+                    {
+                      html += '<li>';
+                    }
+                    if (object.hscode)
+                    {
+                      if (object.tariffs)
+                      {
+                        html += '<u>';
+                      }
+                      if (object.result)
+                      {
+                        html += '<strong>';
+                      }
+                      html += $.beautifyHSCode(object.hscode) + ' - ' + object.description;
+                      if (object.result)
+                      {
+                        html += ' [matches: ' + object.result.keywords + '; m: ' + object.result.mode + '; s: ' + object.result.score + ']';
+                        
+                        html += '</strong>';
+                      }
+                      if (object.tariffs)
+                      {
+                        html += '</u>';
+                      }
+                    }
+                    if (object.children)
+                    {
+                      html += '<ul>';
+                      Object.keys(object.children).sort().forEach(function(childKey)
+                      {
+                        html += renderNode(object.children[childKey]);
+                      });
+                      html += '</ul>';
+                    }
+                    if (!object.nolist)
+                    {
+                      html += '</li>';
+                    }
+                    return html;
+                  }
+                  
+                  html += renderNode({children: result.detailed, nolist: true});
+                  
+                  html += ''
+                }
+                
+                return '<tr>' +
+                       '<th>' + result.item + '</th>' +
+                       '<td>' + hierarchy[result.item].description + html + '</td>' +
+                       '</tr>';
+              }).join(''));
+              $('#searchResults').show();
+            }
+            
+            
+            // agreement and country
+            
+            var agreeementCountry = $( "#searchInputCountryAgreement" ).val().split('-');
+            var agreement = agreeementCountry[0];
+            var country = agreeementCountry[1];
+            
+            // show top level headings
+            results.products.forEach(function(product)
+            {
+              var heading = product.hscode.substr(0, 4);
+              if (!lookup[heading])
+              {
+                lookup[heading] = {
+                  item: heading,
+                  products: {},
+                  matches: 0,
+                  mode: 0,
+                  score: product.score
+                };
+                output.push(lookup[heading]);
+              }
+              heading = lookup[heading];
+              
+              // accumulate individual findings to headings
+              heading.matches |= product.matches;
+              heading.mode |= product.mode;
+              heading.keywords = $.decodeKeywords(results.keywords, heading.matches).join(', ');
+              
+              // don't show detailed matches of other country and agreements
+              if (product.country && product.country !== country)
+              {
+                return;
+              }
+              if (product.agreement && product.agreement !== agreement)
+              {
+                return;
+              }
+              if (product.hscode.length <= 4)
+              {
+                return;
+              }
+              heading.products[product.hscode] = product;
+              product.keywords = $.decodeKeywords(results.keywords, product.matches).join(', ')
+            });
+            
+            // load and show detailed product hierarchy
+            Object.keys(lookup)
+                  .forEach(function(heading)
+            {
+              var headingData = lookup[heading];
+              $.invoke('/tariffs/' + country + '/' + agreement + '/heading/' + heading, function(detailedData)
+              {
+                Object.keys(headingData.products)
+                      .forEach(function(hscode)
+                {
+                  detailedData[hscode].result = headingData.products[hscode];
+                });
+                
+                headingData.detailed = $.produceHierarchyTree(detailedData);
+
+                showResults();
+              });
+            });
+            
+            showResults();
+
           });
         });
         
