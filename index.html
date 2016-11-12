@@ -3,16 +3,15 @@
 <head>
   <title>Search Example</title>
   <meta charset="UTF-8">
-  <!-- jquery and friends -->
-  <script src="//ausftas.github.io/example-api-common/jquery-2.2.4.js"></script>
-  <script src="//ausftas.github.io/example-api-common/jquery-ui.js"></script>
-  <link rel="stylesheet" type="text/css" href="//ausftas.github.io/example-api-common/jquery-ui.css">
+  <!-- Babel, d3 and friends. B -->
+  <script src="/example-api-common/babel.min.js"></script>
+  <script src="/example-api-common/d3.v4.js"></script>
   <!-- look and feel -->
-  <link rel="stylesheet" type="text/css" href="//ausftas.github.io/example-api-common/style.css">
   <link rel="stylesheet" type="text/css" href="http://blog.dfilimonov.com/github-ribbons-css/ribbons.css">
-  <script src="//ausftas.github.io/example-api-common/style.js"></script>
-  <!-- shared sources -->
-  <script src="//ausftas.github.io/example-api-common/common.js"></script>
+  <link rel="stylesheet" type="text/css" href="/example-api-common/style.css">
+  <script type="text/babel" data-presets="es2015" src="/example-api-common/style.js"></script>
+    <!-- shared sources -->
+  <script type="text/babel" data-presets="es2015" src="/example-api-common/common.js"></script>
 </head>
 <body>
   <div id="header"></div>
@@ -31,7 +30,7 @@
     <div id="searchResults" style="display: none;" >
       <p id="searchKeywords" ></p>
       <p id="searchCorrections" ></p>
-      <table border="1">
+      <table border="1" cellspacing="0">
         <thead>
           <tr>
             <th>Heading</th>
@@ -42,202 +41,140 @@
       </table>
     </div>
 
-    <script>
-      $.startExample(function(hierarchy, agreements)
+    <script type="text/babel" data-presets="es2015">
+      FTAPortalAPIExample.start(function(hierarchy, agreements)
       {
-        // typeahead
-        $( "#searchInput" ).autocomplete({
-          minLength: 2,
-          source: function( request, response )
-          {
-            $.invoke("/search-hint/" + request.term.split(/[^a-z]+/g).filter(f => f).join('+'), function( data )
-            {
-              response( data );
-            });
-          }
-        });
+        const searchInput = d3.select('#searchInput');
+        const search = d3.select('#search');
+        const loading = d3.select('#loading');
+        const searchInputCountryAgreement = d3.select("#searchInputCountryAgreement");
+        const searchKeywords = d3.select('#searchKeywords');
+        const searchCorrections = d3.select('#searchCorrections');
+        const searchResultsBody = d3.select('#searchResultsBody');
+        const searchResults = d3.select('#searchResults');
+        const searchInputButton = d3.select('#searchInputButton');
         
-        // country menu
-        var agreementCountries = [];
-        Object.keys(agreements).forEach(function(agreement)
+        // show agreement - country menu
+        let agreementCountries = [];
+        Object.keys(agreements).forEach(agreement =>
         {
-          Object.keys(agreements[agreement].countries).forEach(function(country)
+          Object.keys(agreements[agreement].countries).forEach(country =>
           {
             agreementCountries.push(agreement + '-' + country);
           });
         });
-        
-        $( "#searchInputCountryAgreement" ).html(agreementCountries.map(function(item){return '<option>' + item + '</option>';}).join(''));
+
+        agreementCountries = searchInputCountryAgreement.selectAll("*").data(agreementCountries);
+        agreementCountries.enter().option(function(item) { return item; });
+        agreementCountries.exit().remove();
+        agreementCountries.text(function(item) { return item; });
         
         // saved query
-        $('#searchInput').val(localStorage.query || '')
+        searchInput.val(localStorage.query || '')
+        searchInputCountryAgreement.val(localStorage.queryOptions);
         
         // loading done
-        $('#search').show();
-        $('#loading').hide();
+        search.show();
+        loading.hide();
         
         // perform search
-        $('#searchInputButton').click(function(event)
+        function performSearch()
         {
           // get input and save query
-          var query = localStorage.query = $('#searchInput').val();
+          let query = localStorage.query = searchInput.val();
           
           // perform search
-          query = query.toLowerCase().replace(/[^a-zA-Z0-9 \.]/g, ' ').replace(/\s+/g, '+').replace(/^\+|\+$/g, '').split(/\+/g);
-          $.invoke('/search/' + query.join('+').replace(/\./g, ''), function(results)
+          FTAPortalAPIExample.invoke('/search/' + FTAPortalAPIExample.formatSearchQuery(query))
+            .then(results =>
           {
             // show input keywords
-            $('#searchKeywords').text('You searched for "' + results.keywords.join(' ') + '"');
+            searchKeywords.text(`You searched for "${results.keywords.join(' ')}"`);
             
             // show alternate keywords
+            searchCorrections.html('');
             if (results.alternateKeywords.length > 0)
             {
-              $('#searchCorrections').html('Did you mean <ul>' + results.alternateKeywords.map(function(key)
-              {
-                return '<li><a href="javascript:$(\'#searchInput\').val(\'' + key + '\'); $(\'#searchInputButton\').click()">' + key + '</a></li>'
-              }).join(' ') + '</ul>');
-            }
-            else
-            {
-              $('#searchCorrections').html('');
+              searchCorrections.html('Did you mean');
+              searchCorrections.ul().selectAll().data(results.alternateKeywords).enter().li().a(a => a).attr('href', a => `javascript:document.getElementById('searchInput').value = '${a}'; performSearch();`);
             }
             
             // show results list and hierarchy
-            var output = [];
-            var lookup = {};
+
+            function showResult(result)
+            {
+              let element = document.createElement('tr');
+              let output = d3.select(element);
+              
+              output.th(result.hscode);
+              
+              output = output.td(result.description + ' [matches: ' + result.keywords + '; m: ' + result.mode + '; s: ' + result.score + '] ');
+              
+              if (result.detailed && result.detailed.children.length > 0)
+              {
+                output.ul().selectAll().data(result.detailed.children).enter().append(showResultChild);
+              }
+              
+              return element;
+            }
             
+            function showResultChild(child)
+            {
+              let element = document.createElement('li');
+              let output = d3.select(element);
+              if (child.data.tariffs)
+              {
+                output.a(FTAPortalAPIExample.uglifyHSCode(child.data.hscode, false, true) + ' - ' + child.data.description)
+                  .attr('href', `/example-api-tariffs/#agreement=${agreement}&#country=${country}&hs=${child.data.hscode}`);
+              }
+              else
+              {
+                output.html(child.data.description);
+              }
+              if (child.children && child.children.length > 0)
+              {
+                output.ul().selectAll().data(child.children).enter().append(showResultChild);
+              }
+              return element;
+            }
+
             function showResults()
             {
               // show results
-              $('#searchResultsBody').html(output.map(function(result, resultIndex)
-              {
-                var html = '';
-                
-                html += ' [matches: ' + result.keywords + '; m: ' + result.mode + '; s: ' + result.score + '] ';
-                
-                if (result.detailed)
-                {
-                  html += '';
-                  
-                  function renderNode(object)
-                  {
-                    var html = '';
-                    if (!object.nolist)
-                    {
-                      html += '<li>';
-                    }
-                    if (object.hscode)
-                    {
-                      if (object.tariffs)
-                      {
-                        html += '<u>';
-                      }
-                      if (object.result)
-                      {
-                        html += '<strong>';
-                      }
-                      html += $.beautifyHSCode(object.hscode) + ' - ' + object.description;
-                      if (object.result)
-                      {
-                        html += ' [matches: ' + object.result.keywords + '; m: ' + object.result.mode + '; s: ' + object.result.score + ']';
-                        
-                        html += '</strong>';
-                      }
-                      if (object.tariffs)
-                      {
-                        html += '</u>';
-                      }
-                    }
-                    if (object.children)
-                    {
-                      html += '<ul>';
-                      Object.keys(object.children).sort().forEach(function(childKey)
-                      {
-                        html += renderNode(object.children[childKey]);
-                      });
-                      html += '</ul>';
-                    }
-                    if (!object.nolist)
-                    {
-                      html += '</li>';
-                    }
-                    return html;
-                  }
-                  
-                  html += renderNode({children: result.detailed, nolist: true});
-                  
-                  html += ''
-                }
-                
-                return '<tr>' +
-                       '<th>' + result.item + '</th>' +
-                       '<td>' + hierarchy[result.item].description + html + '</td>' +
-                       '</tr>';
-              }).join(''));
-              $('#searchResults').show();
+              searchResultsBody.html('');
+              searchResultsBody.selectAll().data(results.products).enter().append(showResult);
+              searchResults.show();
             }
             
-            
             // agreement and country
+            let agreeementCountry = (localStorage.queryOptions = searchInputCountryAgreement.val()).split('-');
+            let agreement = agreeementCountry[0];
+            let country = agreeementCountry[1];
             
-            var agreeementCountry = $( "#searchInputCountryAgreement" ).val().split('-');
-            var agreement = agreeementCountry[0];
-            var country = agreeementCountry[1];
-            
-            // show top level headings
-            results.products.forEach(function(product)
+            // make sure data for item exists
+            results.products = results.products.filter(product =>
             {
-              var heading = product.hscode.substr(0, 4);
-              if (!lookup[heading])
+              const countryAgreements = hierarchy[product.hscode].countryAgreements || [];
+              for (let i = 0; i < countryAgreements.length; i++)
               {
-                lookup[heading] = {
-                  item: heading,
-                  products: {},
-                  matches: 0,
-                  mode: 0,
-                  score: product.score
-                };
-                output.push(lookup[heading]);
+                if (countryAgreements[i].country === country && countryAgreements[i].agreement === agreement)
+                {
+                  return true;
+                }
               }
-              heading = lookup[heading];
-              
-              // accumulate individual findings to headings
-              heading.matches |= product.matches;
-              heading.mode |= product.mode;
-              heading.keywords = $.decodeKeywords(results.keywords, heading.matches).join(', ');
-              
-              // don't show detailed matches of other country and agreements
-              if (product.country && product.country !== country)
-              {
-                return;
-              }
-              if (product.agreement && product.agreement !== agreement)
-              {
-                return;
-              }
-              if (product.hscode.length <= 4)
-              {
-                return;
-              }
-              heading.products[product.hscode] = product;
-              product.keywords = $.decodeKeywords(results.keywords, product.matches).join(', ')
+              return false;
             });
             
-            // load and show detailed product hierarchy
-            Object.keys(lookup)
-                  .forEach(function(heading)
+            // pre process results
+            results.products.forEach(product =>
             {
-              var headingData = lookup[heading];
-              $.invoke('/tariffs/' + country + '/' + agreement + '/heading/' + heading, function(detailedData)
+              product.description = hierarchy[product.hscode].description;
+              product.keywords = FTAPortalAPIExample.decodeBitEncodedList(results.keywords, product.matches).join(', ')
+              
+              // get more detailed hierarchy
+              FTAPortalAPIExample.invoke('/tariffs/' + country + '/' + agreement + '/heading/' + product.hscode)
+                .then(detailedData =>
               {
-                Object.keys(headingData.products)
-                      .forEach(function(hscode)
-                {
-                  detailedData[hscode].result = headingData.products[hscode];
-                });
-                
-                headingData.detailed = $.produceHierarchyTree(detailedData);
-
+                product.detailed = FTAPortalAPIExample.stratifyHeadingDetails(product, detailedData);
                 showResults();
               });
             });
@@ -245,13 +182,15 @@
             showResults();
 
           });
-        });
+        }
         
-        $('#searchInput').keydown(function(event)
+        window.performSearch = performSearch;
+        searchInputButton.click(performSearch);
+        searchInput.keydown(() =>
         {
-          if (event.keyCode === 13)
+          if (d3.event.keyCode === 13)
           {
-            $('#searchInputButton').click();
+            performSearch();
           }
         });
         
