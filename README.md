@@ -1,7 +1,7 @@
 # Search Example | Free Trade Agreement Portal API
 
-This example accesses the FTA Portal API through jQuery. It performs a search
-operation and decodes its results and displays to users.
+This example accesses the FTA Portal API. It performs a search
+operation, decodes its results and displays to users.
 
 ## Source code
 
